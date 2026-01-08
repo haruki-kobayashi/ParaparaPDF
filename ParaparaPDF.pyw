@@ -13,9 +13,16 @@ try:
 except ImportError:
     PDF_SUPPORT = False
 
+# ドラッグ＆ドロップ対応（任意）
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    DND_SUPPORT = True
+except ImportError:
+    DND_SUPPORT = False
+
 class PDFViewerGUI:
     def __init__(self):
-        self.root = tk.Tk()
+        self.root = TkinterDnD.Tk() if DND_SUPPORT else tk.Tk()
         self.root.title("ParaparaPDF")
         self.root.geometry("1310x752")  # 横A4サイズの読み込みに合わせたウィンドウサイズ
         self.root.configure(bg='SlateGray1')  # メインウィンドウの背景色
@@ -82,17 +89,33 @@ class PDFViewerGUI:
 
         # ディレクトリ選択
         tk.Label(search_frame, text="ディレクトリパターン:", bg='SlateGray1', font=meiryo_font).grid(row=1, column=0, sticky=tk.W)
-        self.dir_var = tk.StringVar(value=self.current_dir)
+        # 起動時は空欄
+        self.dir_var = tk.StringVar(value="")
         self.dir_entry = ttk.Entry(search_frame, textvariable=self.dir_var, width=25)
         self.dir_entry.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(2, 2))
         self.dir_entry.bind('<Return>', lambda e: self.search_pdfs())
         tk.Button(search_frame, text="参照", command=self.select_directory, bg='white', font=meiryo_font, relief='solid', bd=1).grid(row=2, column=1, padx=(5, 0), pady=(2, 2))
 
+        # フォルダのドラッグ＆ドロップ対応（tkinterdnd2がある場合）
+        if DND_SUPPORT:
+            try:
+                # Entry と ルートウィンドウのどちらにドロップしても受け付ける
+                self.dir_entry.drop_target_register(DND_FILES)
+                self.dir_entry.dnd_bind('<<Drop>>', self.on_drop_directory)
+                self.root.drop_target_register(DND_FILES)
+                self.root.dnd_bind('<<Drop>>', self.on_drop_directory)
+                # ヒントラベル
+                tk.Label(search_frame,
+                         text="フォルダをここへドラッグ＆ドロップ",
+                         bg='SlateGray1', font=meiryo_font).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(2, 6))
+            except Exception:
+                pass
+
         # パターン入力
-        tk.Label(search_frame, text="ファイル名パターン:", bg='SlateGray1', font=meiryo_font).grid(row=3, column=0, sticky=tk.W)
+        tk.Label(search_frame, text="ファイル名パターン:", bg='SlateGray1', font=meiryo_font).grid(row=4, column=0, sticky=tk.W)
         self.pattern_var = tk.StringVar(value="*")
         pattern_frame = tk.Frame(search_frame, bg='SlateGray1')
-        pattern_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(2, 0))
+        pattern_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(2, 0))
         self.pattern_entry = ttk.Entry(pattern_frame, textvariable=self.pattern_var, width=15)
         self.pattern_entry.grid(row=0, column=0, sticky=(tk.W, tk.E))
         self.pattern_entry.bind('<Return>', lambda e: self.search_pdfs())
@@ -100,9 +123,9 @@ class PDFViewerGUI:
         pattern_frame.columnconfigure(0, weight=1)
 
         # ページ範囲指定
-        tk.Label(search_frame, text="表示ページ範囲:", bg='SlateGray1', font=meiryo_font).grid(row=5, column=0, sticky=tk.W, pady=(5, 0))
+        tk.Label(search_frame, text="表示ページ範囲:", bg='SlateGray1', font=meiryo_font).grid(row=6, column=0, sticky=tk.W, pady=(5, 0))
         page_range_frame = tk.Frame(search_frame, bg='SlateGray1')
-        page_range_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(2, 0))
+        page_range_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(2, 0))
 
         self.page_range_var = tk.StringVar(value="*")
         self.page_range_entry = ttk.Entry(page_range_frame, textvariable=self.page_range_var, width=15)
@@ -114,7 +137,7 @@ class PDFViewerGUI:
 
         # ヘルプテキスト
         help_text = "例: *, 1-3, 5, -8, 10-, even, odd"
-        tk.Label(search_frame, text=help_text, bg='SlateGray1', font=meiryo_font).grid(row=7, column=0, sticky=tk.W)
+        tk.Label(search_frame, text=help_text, bg='SlateGray1', font=meiryo_font).grid(row=8, column=0, sticky=tk.W)
 
         # ファイルリストフレーム
         list_frame = tk.LabelFrame(left_panel, text="検索結果一覧", padx=5, pady=5, bg='SlateGray1', bd=1, relief='solid', font=meiryo_frame_font)
@@ -328,6 +351,27 @@ class PDFViewerGUI:
         if directory:
             self.dir_var.set(directory)
             self.current_dir = directory
+
+    def on_drop_directory(self, event):
+        """DnDで受け取ったフォルダ/ファイルからディレクトリを設定"""
+        try:
+            if not event or not hasattr(event, 'data'):
+                return
+            # 複数パスに対応（スペースや波括弧を含む場合にも対応）
+            paths = list(self.root.tk.splitlist(event.data))
+            if not paths:
+                return
+            path = os.path.normpath(paths[0])
+            # ファイルが落とされた場合はその親ディレクトリを使用
+            if os.path.isfile(path):
+                path = os.path.dirname(path)
+            if os.path.isdir(path):
+                self.dir_var.set(path)
+                self.current_dir = path
+                # 入力欄へフォーカスを戻す
+                self.dir_entry.focus_set()
+        except Exception:
+            pass
 
     def find_pdf_files(self, directory, pattern):
         """指定されたディレクトリとその下層から、パターンにマッチするPDFファイルを検索"""
